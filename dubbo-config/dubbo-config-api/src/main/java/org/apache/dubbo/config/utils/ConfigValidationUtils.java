@@ -205,6 +205,9 @@ public class ConfigValidationUtils {
                     }
                     List<URL> urls = UrlUtils.parseURLs(address, map);
 
+                    if (urls == null) {
+                        throw new IllegalStateException(String.format("url should not be null,address is %s", address));
+                    }
                     for (URL url : urls) {
 
                         url = URLBuilder.from(url)
@@ -465,8 +468,7 @@ public class ConfigValidationUtils {
     public static void validateMonitorConfig(MonitorConfig config) {
         if (config != null) {
             if (!config.isValid()) {
-                logger.info("There's no valid monitor config found, if you want to open monitor statistics for Dubbo, " +
-                        "please make sure your monitor is configured properly.");
+                logger.info("No valid monitor config found, specify monitor info to enable collection of Dubbo statistics");
             }
 
             checkParameterName(config.getParameters());

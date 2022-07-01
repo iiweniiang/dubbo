@@ -23,12 +23,10 @@ import org.apache.dubbo.common.bytecode.Wrapper;
 import org.apache.dubbo.common.extension.ExtensionLoader;
 import org.apache.dubbo.common.logger.Logger;
 import org.apache.dubbo.common.logger.LoggerFactory;
-import org.apache.dubbo.common.utils.ClassUtils;
 import org.apache.dubbo.common.utils.CollectionUtils;
 import org.apache.dubbo.common.utils.ConfigUtils;
 import org.apache.dubbo.common.utils.NamedThreadFactory;
 import org.apache.dubbo.common.utils.StringUtils;
-import org.apache.dubbo.common.utils.UrlUtils;
 import org.apache.dubbo.config.annotation.Service;
 import org.apache.dubbo.config.bootstrap.DubboBootstrap;
 import org.apache.dubbo.config.event.ServiceConfigExportedEvent;
@@ -52,11 +50,6 @@ import org.apache.dubbo.rpc.service.GenericService;
 import org.apache.dubbo.rpc.support.ProtocolUtils;
 
 import java.lang.reflect.Method;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-import java.net.SocketAddress;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -82,12 +75,10 @@ import static org.apache.dubbo.common.constants.CommonConstants.PROVIDER_SIDE;
 import static org.apache.dubbo.common.constants.CommonConstants.REGISTER_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.REMOTE_METADATA_STORAGE_TYPE;
 import static org.apache.dubbo.common.constants.CommonConstants.REVISION_KEY;
+import static org.apache.dubbo.common.constants.CommonConstants.SERVICE_NAME_MAPPING_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.SIDE_KEY;
 import static org.apache.dubbo.common.constants.RegistryConstants.DYNAMIC_KEY;
-import static org.apache.dubbo.common.constants.RegistryConstants.REGISTRY_KEY;
-import static org.apache.dubbo.common.constants.RegistryConstants.REGISTRY_TYPE_KEY;
 import static org.apache.dubbo.common.constants.RegistryConstants.SERVICE_REGISTRY_PROTOCOL;
-import static org.apache.dubbo.common.constants.RegistryConstants.SERVICE_REGISTRY_TYPE;
 import static org.apache.dubbo.common.utils.NetUtils.getAvailablePort;
 import static org.apache.dubbo.common.utils.NetUtils.getLocalHost;
 import static org.apache.dubbo.common.utils.NetUtils.isInvalidLocalHost;
@@ -95,8 +86,6 @@ import static org.apache.dubbo.common.utils.NetUtils.isInvalidPort;
 import static org.apache.dubbo.config.Constants.DUBBO_IP_TO_REGISTRY;
 import static org.apache.dubbo.config.Constants.DUBBO_PORT_TO_BIND;
 import static org.apache.dubbo.config.Constants.DUBBO_PORT_TO_REGISTRY;
-import static org.apache.dubbo.config.Constants.MULTICAST;
-import static org.apache.dubbo.config.Constants.MULTIPLE;
 import static org.apache.dubbo.config.Constants.SCOPE_NONE;
 import static org.apache.dubbo.remoting.Constants.BIND_IP_KEY;
 import static org.apache.dubbo.remoting.Constants.BIND_PORT_KEY;
@@ -110,6 +99,8 @@ import static org.apache.dubbo.rpc.Constants.TOKEN_KEY;
 import static org.apache.dubbo.rpc.cluster.Constants.EXPORT_KEY;
 
 public class ServiceConfig<T> extends ServiceConfigBase<T> {
+
+    private static final long serialVersionUID = -412700146501624375L;
 
     public static final Logger logger = LoggerFactory.getLogger(ServiceConfig.class);
 
@@ -235,7 +226,14 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
         }
 
         if (shouldDelay()) {
-            DELAY_EXPORT_EXECUTOR.schedule(this::doExport, getDelay(), TimeUnit.MILLISECONDS);
+            DELAY_EXPORT_EXECUTOR.schedule(() -> {
+                try {
+                    // Delay export server should print stack trace if there are exception occur.
+                    this.doExport();
+                } catch (Exception e) {
+                    logger.error("delay export server occur exception, please check it.", e);
+                }
+            }, getDelay(), TimeUnit.MILLISECONDS);
         } else {
             doExport();
         }
@@ -248,8 +246,7 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
         exportedURLs.forEach(url -> {
             // dubbo2.7.x does not register serviceNameMapping information with the registry by default.
             // Only when the user manually turns on the service introspection, can he register with the registration center.
-            boolean isServiceDiscovery = UrlUtils.isServiceDiscoveryRegistryType(url);
-            if (isServiceDiscovery) {
+            if (url.getParameters().containsKey(SERVICE_NAME_MAPPING_KEY)) {
                 Map<String, String> parameters = getApplication().getParameters();
                 ServiceNameMapping.getExtension(parameters != null ? parameters.get(MAPPING_KEY) : null).map(url);
             }
@@ -294,36 +291,7 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
             checkRef();
             generic = FALSE_VALUE;
         }
-        if (local != null) {
-            if (TRUE_VALUE.equals(local)) {
-                local = interfaceName + LOCAL_SUFFIX;
-            }
-            Class<?> localClass;
-            try {
-                localClass = ClassUtils.forNameWithThreadContextClassLoader(local);
-            } catch (ClassNotFoundException e) {
-                throw new IllegalStateException(e.getMessage(), e);
-            }
-            if (!interfaceClass.isAssignableFrom(localClass)) {
-                throw new IllegalStateException(
-                        "The local implementation class " + localClass.getName() + " not implement interface " + interfaceName);
-            }
-        }
-        if (stub != null) {
-            if (TRUE_VALUE.equals(stub)) {
-                stub = interfaceName + STUB_SUFFIX;
-            }
-            Class<?> stubClass;
-            try {
-                stubClass = ClassUtils.forNameWithThreadContextClassLoader(stub);
-            } catch (ClassNotFoundException e) {
-                throw new IllegalStateException(e.getMessage(), e);
-            }
-            if (!interfaceClass.isAssignableFrom(stubClass)) {
-                throw new IllegalStateException(
-                        "The stub implementation class " + stubClass.getName() + " not implement interface " + interfaceName);
-            }
-        }
+
         checkStubAndLocal(interfaceClass);
         ConfigValidationUtils.checkMock(interfaceClass, this);
         ConfigValidationUtils.validateServiceConfig(this);
@@ -516,7 +484,7 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
                 if (CollectionUtils.isNotEmpty(registryURLs)) {
                     for (URL registryURL : registryURLs) {
                         if (SERVICE_REGISTRY_PROTOCOL.equals(registryURL.getProtocol())) {
-                            url = url.addParameterIfAbsent(REGISTRY_TYPE_KEY, SERVICE_REGISTRY_TYPE);
+                            url = url.addParameterIfAbsent(SERVICE_NAME_MAPPING_KEY, "true");
                         }
 
                         //if protocol is only injvm ,not register
@@ -622,37 +590,8 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
             }
             if (isInvalidLocalHost(hostToBind)) {
                 anyhost = true;
-                try {
-                    logger.info("No valid ip found from environment, try to find valid host from DNS.");
-                    hostToBind = InetAddress.getLocalHost().getHostAddress();
-                } catch (UnknownHostException e) {
-                    logger.warn(e.getMessage(), e);
-                }
-                if (isInvalidLocalHost(hostToBind)) {
-                    if (CollectionUtils.isNotEmpty(registryURLs)) {
-                        for (URL registryURL : registryURLs) {
-                            if (MULTICAST.equalsIgnoreCase(registryURL.getParameter(REGISTRY_KEY))) {
-                                // skip multicast registry since we cannot connect to it via Socket
-                                continue;
-                            }
-                            if (MULTIPLE.equalsIgnoreCase(registryURL.getParameter("registry"))) {
-                                // skip, multiple-registry address is a fake ip
-                                continue;
-                            }
-                            try (Socket socket = new Socket()) {
-                                SocketAddress addr = new InetSocketAddress(registryURL.getHost(), registryURL.getPort());
-                                socket.connect(addr, 1000);
-                                hostToBind = socket.getLocalAddress().getHostAddress();
-                                break;
-                            } catch (Exception e) {
-                                logger.warn(e.getMessage(), e);
-                            }
-                        }
-                    }
-                    if (isInvalidLocalHost(hostToBind)) {
-                        hostToBind = getLocalHost();
-                    }
-                }
+                logger.info("No valid ip found from environment, try to get local host.");
+                hostToBind = getLocalHost();
             }
         }
 
@@ -719,14 +658,14 @@ public class ServiceConfig<T> extends ServiceConfigBase<T> {
         }
         String portToRegistryStr = getValueFromConfig(protocolConfig, key);
         Integer portToRegistry = parsePort(portToRegistryStr);
-        if (portToRegistry == null) {
-            portToRegistry = portToBind;
+        if (portToRegistry != null) {
+            portToBind = portToRegistry;
         }
 
         // save bind port, used as url's key later
-        map.put(BIND_PORT_KEY, String.valueOf(portToRegistry));
+        map.put(BIND_PORT_KEY, String.valueOf(portToBind));
 
-        return portToRegistry;
+        return portToBind;
     }
 
 

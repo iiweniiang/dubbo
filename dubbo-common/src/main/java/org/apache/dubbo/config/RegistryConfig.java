@@ -29,7 +29,7 @@ import static org.apache.dubbo.common.constants.CommonConstants.PREFERRED_KEY;
 import static org.apache.dubbo.common.constants.RegistryConstants.REGISTRY_KEY;
 import static org.apache.dubbo.common.constants.RemotingConstants.BACKUP_KEY;
 import static org.apache.dubbo.common.utils.PojoUtils.updatePropertyIfAbsent;
-import static org.apache.dubbo.config.Constants.REGISTRIES_SUFFIX;
+import static org.apache.dubbo.config.Constants.REGISTRIES_PREFIX;
 
 /**
  * RegistryConfig
@@ -223,11 +223,6 @@ public class RegistryConfig extends AbstractConfig {
                 updatePropertyIfAbsent(this::getProtocol, this::setProtocol, url.getProtocol());
                 updatePropertyIfAbsent(this::getPort, this::setPort, url.getPort());
 
-//                setUsername(url.getUsername());
-//                setPassword(url.getPassword());
-//                updateIdIfAbsent(url.getProtocol());
-//                updateProtocolIfAbsent(url.getProtocol());
-//                updatePortIfAbsent(url.getPort());
                 Map<String, String> params = url.getParameters();
                 if (CollectionUtils.isNotEmptyMap(params)) {
                     params.remove(BACKUP_KEY);
@@ -510,7 +505,7 @@ public class RegistryConfig extends AbstractConfig {
     public void refresh() {
         super.refresh();
         if (StringUtils.isNotEmpty(this.getId())) {
-            this.setPrefix(REGISTRIES_SUFFIX);
+            this.setPrefix(REGISTRIES_PREFIX);
             super.refresh();
         }
     }

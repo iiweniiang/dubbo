@@ -59,9 +59,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+import static org.apache.dubbo.common.constants.CommonConstants.COMMA_SEPARATOR;
 import static org.apache.dubbo.common.constants.CommonConstants.GROUP_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.INTERFACE_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.LAZY_CONNECT_KEY;
+import static org.apache.dubbo.common.constants.CommonConstants.METHODS_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.PATH_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.STUB_EVENT_KEY;
 import static org.apache.dubbo.common.constants.CommonConstants.VERSION_KEY;
@@ -121,12 +123,12 @@ public class DubboProtocol extends AbstractProtocol {
             Invoker<?> invoker = getInvoker(channel, inv);
             // need to consider backward-compatibility if it's a callback
             if (Boolean.TRUE.toString().equals(inv.getObjectAttachments().get(IS_CALLBACK_SERVICE_INVOKE))) {
-                String methodsStr = invoker.getUrl().getParameters().get("methods");
+                String methodsStr = invoker.getUrl().getParameters().get(METHODS_KEY);
                 boolean hasMethod = false;
-                if (methodsStr == null || !methodsStr.contains(",")) {
+                if (methodsStr == null || !methodsStr.contains(COMMA_SEPARATOR)) {
                     hasMethod = inv.getMethodName().equals(methodsStr);
                 } else {
-                    String[] methods = methodsStr.split(",");
+                    String[] methods = methodsStr.split(COMMA_SEPARATOR);
                     for (String method : methods) {
                         if (inv.getMethodName().equals(method)) {
                             hasMethod = true;
@@ -223,11 +225,6 @@ public class DubboProtocol extends AbstractProtocol {
         return INSTANCE;
     }
 
-    @Override
-    public Collection<Exporter<?>> getExporters() {
-        return Collections.unmodifiableCollection(exporterMap.values());
-    }
-
     private boolean isClientSide(Channel channel) {
         InetSocketAddress address = channel.getRemoteAddress();
         URL url = channel.getUrl();
@@ -242,13 +239,14 @@ public class DubboProtocol extends AbstractProtocol {
         int port = channel.getLocalAddress().getPort();
         String path = (String) inv.getObjectAttachments().get(PATH_KEY);
 
-        // if it's callback service on client side
+        //if it's stub service on client side(after enable stubevent, usually is set up onconnect or ondisconnect method)
         isStubServiceInvoke = Boolean.TRUE.toString().equals(inv.getObjectAttachments().get(STUB_EVENT_KEY));
         if (isStubServiceInvoke) {
-            port = channel.getRemoteAddress().getPort();
+            //when a stub service export to local, it usually can't be exposed to port
+            port = 0;
         }
 
-        //callback
+        // if it's callback service on client side
         isCallBackServiceInvoke = isClientSide(channel) && !isStubServiceInvoke;
         if (isCallBackServiceInvoke) {
             path += "." + inv.getObjectAttachments().get(CALLBACK_SERVICE_KEY);
@@ -261,11 +259,11 @@ public class DubboProtocol extends AbstractProtocol {
                 (String) inv.getObjectAttachments().get(VERSION_KEY),
                 (String) inv.getObjectAttachments().get(GROUP_KEY)
         );
-        DubboExporter<?> exporter = (DubboExporter<?>) exporterMap.get(serviceKey);
+        DubboExporter<?> exporter = (DubboExporter<?>) exporterMap.getExport(serviceKey);
 
         if (exporter == null) {
             throw new RemotingException(channel,
-                    "Not found exported service: " + serviceKey + " in " + exporterMap.keySet() + ", may be version or group mismatch " +
+                    "Not found exported service: " + serviceKey + " in " + exporterMap.getExporterMap().keySet() + ", may be version or group mismatch " +
                             ", channel: consumer: " + channel.getRemoteAddress() + " --> provider: " + channel.getLocalAddress() +
                             ", message:" + getInvocationWithoutData(inv));
         }
@@ -289,7 +287,7 @@ public class DubboProtocol extends AbstractProtocol {
         // export service.
         String key = serviceKey(url);
         DubboExporter<T> exporter = new DubboExporter<T>(invoker, key, exporterMap);
-        exporterMap.put(key, exporter);
+        exporterMap.addExportMap(key, exporter);
 
         //export an stub service for dispatching event
         Boolean isStubSupportEvent = url.getParameter(STUB_EVENT_KEY, DEFAULT_STUB_EVENT);
